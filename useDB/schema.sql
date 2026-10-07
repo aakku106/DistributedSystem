@@ -25,3 +25,9 @@ CREATE TABLE order_items (
     unit_price NUMERIC(12, 2) NOT NULL CHECK (unit_price >= 0),
     quantity INT NOT NULL CHECK (quantity > 0)
 );
+
+CREATE TABLE stock (
+    product_id UUID PRIMARY KEY REFERENCES products(id) ON DELETE CASCADE,
+    quantity INT NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
