@@ -11,6 +11,12 @@ CREATE TABLE products (
     price NUMERIC(12, 2) NOT NULL CHECK (price >= 0)
 );
 
+CREATE TABLE stock (
+    product_id UUID PRIMARY KEY REFERENCES products(id) ON DELETE CASCADE,
+    quantity INT NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE TABLE orders (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -24,10 +30,4 @@ CREATE TABLE order_items (
     product_id UUID NOT NULL REFERENCES products(id),
     unit_price NUMERIC(12, 2) NOT NULL CHECK (unit_price >= 0),
     quantity INT NOT NULL CHECK (quantity > 0)
-);
-
-CREATE TABLE stock (
-    product_id UUID PRIMARY KEY REFERENCES products(id) ON DELETE CASCADE,
-    quantity INT NOT NULL DEFAULT 0 CHECK (quantity >= 0),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
