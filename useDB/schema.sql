@@ -12,12 +12,11 @@ CREATE TABLE products (
 );
 
 CREATE TABLE orders (
-    id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
-    user_id UUID NOT NULL, -- Logical ID referencing user_db.users (NO foreign key constraint)
-    status VARCHAR(30) NOT NULL DEFAULT 'PENDING', -- PENDING, PAID, SHIPPED, CANCELLED, FAILED
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
     total_amount NUMERIC(12, 2) NOT NULL CHECK (total_amount >= 0),
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE TABLE order_items (
     id UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
