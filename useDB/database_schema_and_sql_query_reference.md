@@ -1,152 +1,252 @@
-# Database Schema & SQL Query Documentation
+# Database Schema & SQL Query Reference
 
-This document provides an overview of the PostgreSQL database tables and the corresponding `sqlc` queries used for the starter e-commerce project.
+This document provides a complete reference for the PostgreSQL e-commerce starter schema and its corresponding `sqlc` queries, tailored for a **Primary-Replica (Read-Write Split)** architecture.
 
 ---
 
-## 1. Schema Overview & Table Descriptions
+## 1. Business & Entity Overview
+
+From a business operations perspective, the tables represent the following core entities:
+
+* **`users` (Customer Registry)**: Holds customer account details, authentication data, and personal information.
+* **`products` (Product Catalog)**: Represents items displayed in the storefront (e.g., Toy Aeroplane, Fighter Jet) along with their current listing prices.
+* **`stock` (Physical Inventory)**: Tracks the physical count of available items in the warehouse in a 1:1 relationship with `products`. Decoupled from `products` to minimize row locking during frequent stock updates.
+* **`orders` (Sales Order Header)**: Stores receipt-level details for sales made to customers (customer ID, order status, total price, timestamp).
+* **`order_items` (Sales Line Items)**: Tracks individual products and quantities purchased inside a specific order.
+  * **Note**: This reflects **customer purchases**, not supplier/procurement details. It snapshots `unit_price` at the moment of sale so historical records remain unaffected by future product catalog price changes.
+
+---
+
+## 2. Table Definitions
 
 ### `users`
-* **Purpose**: Stores account details for users in the system.
-* **Key Behavior**: Serves as the primary entity for ownership across orders.
-* **Columns**:
-  * `id` (`UUID`): Primary key, auto-generated using `gen_random_uuid()`.
-  * `email` (`VARCHAR(255)`): Unique email address for authentication/identification.
-  * `password_hash` (`VARCHAR(255)`): Hashed user password.
-  * `full_name` (`VARCHAR(100)`): Display name of the user.
-
----
+```sql
+CREATE TABLE users (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    email VARCHAR(255) NOT NULL UNIQUE,
+    password_hash VARCHAR(255) NOT NULL,
+    full_name VARCHAR(100) NOT NULL
+);
+```
 
 ### `products`
-* **Purpose**: Holds basic catalog details for items available for sale.
-* **Key Behavior**: Stock tracking is decoupled into its own table (`stock`) to prevent lock contention during inventory updates.
-* **Columns**:
-  * `id` (`UUID`): Primary key, auto-generated.
-  * `name` (`VARCHAR(255)`): Name of the product.
-  * `price` (`NUMERIC(12, 2)`): Base price of the product (must be $\ge 0$).
-
----
+```sql
+CREATE TABLE products (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    name VARCHAR(255) NOT NULL,
+    price NUMERIC(12, 2) NOT NULL CHECK (price >= 0)
+);
+```
 
 ### `stock`
-* **Purpose**: Manages real-time inventory counts for products in a 1:1 relationship.
-* **Key Behavior**: Referenced via `product_id`. Automatically cleaned up if the corresponding product is deleted (`ON DELETE CASCADE`).
-* **Columns**:
-  * `product_id` (`UUID`): Primary key and foreign key referencing `products(id)`.
-  * `quantity` (`INT`): Available units in stock (must be $\ge 0$).
-  * `updated_at` (`TIMESTAMPTZ`): Timestamp tracking the last inventory alteration.
-
----
+```sql
+CREATE TABLE stock (
+    product_id UUID PRIMARY KEY REFERENCES products(id) ON DELETE CASCADE,
+    quantity INT NOT NULL DEFAULT 0 CHECK (quantity >= 0),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
 
 ### `orders`
-* **Purpose**: Acts as the header table for purchase orders placed by users.
-* **Key Behavior**: Tracks overall order lifecycle (`PENDING`, `PAID`, `CANCELLED`, etc.) and total cost. Deleted cascade-wise if the associated user is removed.
-* **Columns**:
-  * `id` (`UUID`): Primary key, auto-generated.
-  * `user_id` (`UUID`): Foreign key referencing `users(id)`.
-  * `status` (`VARCHAR(30)`): Order lifecycle state (default: `'PENDING'`).
-  * `total_amount` (`NUMERIC(12, 2)`): Total calculated price of the order.
-  * `created_at` (`TIMESTAMPTZ`): Creation timestamp.
-
----
+```sql
+CREATE TABLE orders (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    status VARCHAR(30) NOT NULL DEFAULT 'PENDING',
+    total_amount NUMERIC(12, 2) NOT NULL CHECK (total_amount >= 0),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
 
 ### `order_items`
-* **Purpose**: Represents line items attached to a specific order.
-* **Key Behavior**: Snapshots `unit_price` at the time of order creation to maintain historical accuracy even if the product's catalog price changes later.
-* **Columns**:
-  * `id` (`UUID`): Primary key, auto-generated.
-  * `order_id` (`UUID`): Foreign key referencing `orders(id)` (`ON DELETE CASCADE`).
-  * `product_id` (`UUID`): Foreign key referencing `products(id)`.
-  * `unit_price` (`NUMERIC(12, 2)`): Price of a single unit at purchase time.
-  * `quantity` (`INT`): Number of units purchased (must be $> 0$).
+```sql
+CREATE TABLE order_items (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    order_id UUID NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    product_id UUID NOT NULL REFERENCES products(id),
+    unit_price NUMERIC(12, 2) NOT NULL CHECK (unit_price >= 0),
+    quantity INT NOT NULL CHECK (quantity > 0)
+);
+```
 
 ---
 
-## 2. SQL Query Operations (`sqlc`)
+## 3. Read-Write Split Query Architecture
 
-Below is the detailed breakdown of what each annotated query accomplishes and how it interacts with the database.
-
----
-
-### User Queries
-
-#### `CreateUser` (`:one`)
-* **Table Target**: `users`
-* **Operation**: `INSERT`
-* **Description**: Registers a new user account. Returns the created `id`, `email`, and `full_name` to pass back to the caller.
-
-#### `UpdateUser` (`:one`)
-* **Table Target**: `users`
-* **Operation**: `UPDATE`
-* **Description**: Updates user profile details (`email`, `full_name`). Uses `COALESCE` to allow partial updates without overwriting existing data if `NULL` parameters are passed.
-
-#### `DeleteUser` (`:exec`)
-* **Table Target**: `users`
-* **Operation**: `DELETE`
-* **Description**: Deletes a user by their `id`. Triggers cascading deletion on any associated orders.
+To support **Read Replicas**, queries are explicitly split into two categories:
+* **Write Queries (`queries_write.sql`)**: Routed to the **Primary Database**.
+* **Read Queries (`queries_read.sql`)**: Routed to the **Read-Only Replica Database**.
 
 ---
 
-### Product Queries
+### A. Primary / Write Queries (`queries_write.sql`)
 
-#### `CreateProduct` (`:one`)
-* **Table Target**: `products`
-* **Operation**: `INSERT`
-* **Description**: Inserts a new product into the catalog with its `name` and `price`. Returns the newly generated product record.
+All data-modifying queries (`INSERT`, `UPDATE`, `DELETE`) and immediate state-changing operations run on the Primary DB.
 
-#### `UpdateProduct` (`:one`)
-* **Table Target**: `products`
-* **Operation**: `UPDATE`
-* **Description**: Modifies a product's name or price based on its `id`.
+#### User Writes
+```sql
+-- name: CreateUser :one
+INSERT INTO users (email, password_hash, full_name)
+VALUES ($1, $2, $3)
+RETURNING id, email, full_name;
 
-#### `DeleteProduct` (`:exec`)
-* **Table Target**: `products`
-* **Operation**: `DELETE`
-* **Description**: Removes a product from the database. Automatically removes the associated `stock` record via cascading foreign keys.
+-- name: UpdateUser :one
+UPDATE users
+SET email = COALESCE($2, email),
+    full_name = COALESCE($3, full_name)
+WHERE id = $1
+RETURNING id, email, full_name;
+
+-- name: DeleteUser :exec
+DELETE FROM users
+WHERE id = $1;
+```
+
+#### Product Writes
+```sql
+-- name: CreateProduct :one
+INSERT INTO products (name, price)
+VALUES ($1, $2)
+RETURNING id, name, price;
+
+-- name: UpdateProduct :one
+UPDATE products
+SET name = $2, price = $3
+WHERE id = $1
+RETURNING id, name, price;
+
+-- name: DeleteProduct :exec
+DELETE FROM products
+WHERE id = $1;
+```
+
+#### Stock Writes
+```sql
+-- name: CreateStock :one
+INSERT INTO stock (product_id, quantity)
+VALUES ($1, $2)
+RETURNING product_id, quantity, updated_at;
+
+-- name: UpdateStock :one
+UPDATE stock
+SET quantity = $2,
+    updated_at = CURRENT_TIMESTAMP
+WHERE product_id = $1
+RETURNING product_id, quantity, updated_at;
+
+-- name: DeductStock :one
+UPDATE stock
+SET quantity = quantity - $2,
+    updated_at = CURRENT_TIMESTAMP
+WHERE product_id = $1 
+  AND quantity >= $2
+RETURNING product_id, quantity, updated_at;
+```
+
+#### Order Writes
+```sql
+-- name: CreateOrder :one
+INSERT INTO orders (user_id, status, total_amount)
+VALUES ($1, $2, $3)
+RETURNING id, user_id, status, total_amount, created_at;
+
+-- name: CreateOrderItem :one
+INSERT INTO order_items (order_id, product_id, unit_price, quantity)
+VALUES ($1, $2, $3, $4)
+RETURNING id, order_id, product_id, unit_price, quantity;
+
+-- name: UpdateOrderStatus :one
+UPDATE orders
+SET status = $2
+WHERE id = $1
+RETURNING id, status;
+
+-- name: CancelOrder :one
+UPDATE orders
+SET status = 'CANCELLED'
+WHERE id = $1 
+  AND status != 'CANCELLED'
+RETURNING id, status;
+
+-- name: RestoreStockFromOrder :exec
+UPDATE stock s
+SET quantity = s.quantity + oi.quantity,
+    updated_at = CURRENT_TIMESTAMP
+FROM order_items oi
+WHERE oi.product_id = s.product_id
+  AND oi.order_id = $1;
+```
 
 ---
 
-### Stock Queries
+### B. Secondary / Read Queries (`queries_read.sql`)
 
-#### `CreateStock` (`:one`)
-* **Table Target**: `stock`
-* **Operation**: `INSERT`
-* **Description**: Initializes an inventory row for a newly created product (`product_id`) with an initial `quantity`.
+All retrieval queries (`SELECT`) offload read traffic onto the secondary read replica.
 
-#### `UpdateStock` (`:one`)
-* **Table Target**: `stock`
-* **Operation**: `UPDATE`
-* **Description**: Overwrites the stock quantity to a specific target number (e.g., during manual inventory reconciliations) and updates `updated_at`.
+#### User Reads
+```sql
+-- name: GetUserByID :one
+SELECT id, email, full_name
+FROM users
+WHERE id = $1;
 
-#### `DeductStock` (`:one`)
-* **Table Target**: `stock`
-* **Operation**: `UPDATE`
-* **Description**: Atomic deduction of stock for checkout processing. The `quantity >= $2` clause guarantees that stock cannot drop below zero, failing the update if insufficient inventory exists.
+-- name: GetUserByEmail :one
+SELECT id, email, password_hash, full_name
+FROM users
+WHERE email = $1;
+```
+
+#### Product & Stock Reads
+```sql
+-- name: GetProductByID :one
+SELECT id, name, price
+FROM products
+WHERE id = $1;
+
+-- name: ListProductsWithStock :many
+SELECT 
+    p.id, 
+    p.name, 
+    p.price, 
+    COALESCE(s.quantity, 0) AS stock_quantity
+FROM products p
+LEFT JOIN stock s ON p.id = s.product_id
+ORDER BY p.name ASC;
+```
+
+#### Order Reads
+```sql
+-- name: GetOrderHeader :one
+SELECT id, user_id, status, total_amount, created_at
+FROM orders
+WHERE id = $1;
+
+-- name: GetOrderItemsDetails :many
+SELECT 
+    oi.id, 
+    oi.product_id, 
+    p.name AS product_name, 
+    oi.unit_price, 
+    oi.quantity, 
+    (oi.unit_price * oi.quantity) AS line_total
+FROM order_items oi
+JOIN products p ON oi.product_id = p.id
+WHERE oi.order_id = $1;
+
+-- name: ListUserOrders :many
+SELECT id, status, total_amount, created_at
+FROM orders
+WHERE user_id = $1
+ORDER BY created_at DESC;
+```
 
 ---
 
-### Order Queries
+## 4. Key Architectural Considerations
 
-#### `CreateOrder` (`:one`)
-* **Table Target**: `orders`
-* **Operation**: `INSERT`
-* **Description**: Creates a new order header for a user with an initial status and total price.
+1. **Replication Lag Handling**:
+   - Because replication from Primary to Replica is asynchronous, querying a Replica immediately after a write (e.g., redirecting to order details immediately upon checkout) may cause a transient `404 Not Found`.
+   - **Rule**: Read requests that immediately follow a write operation should route through the **Primary DB pool** to guarantee immediate consistency.
 
-#### `CreateOrderItem` (`:one`)
-* **Table Target**: `order_items`
-* **Operation**: `INSERT`
-* **Description**: Adds an individual line item to an order, capturing the historical snapshot of the unit price and quantity.
-
-#### `UpdateOrderStatus` (`:one`)
-* **Table Target**: `orders`
-* **Operation**: `UPDATE`
-* **Description**: Changes the order status (e.g., from `'PENDING'` to `'PAID'` or `'SHIPPED'`).
-
-#### `CancelOrder` (`:one`)
-* **Table Target**: `orders`
-* **Operation**: `UPDATE`
-* **Description**: Sets the order status to `'CANCELLED'`. Guarded by `status != 'CANCELLED'` to prevent duplicate cancellations.
-
-#### `RestoreStockFromOrder` (`:exec`)
-* **Table Target**: `stock`, `order_items`
-* **Operation**: `UPDATE ... FROM`
-* **Description**: Reverts stock levels when an order is cancelled. Joins `order_items` with `stock` for the target `order_id` and adds the ordered quantities back into inventory.
+2. **Transactional Integrity**:
+   - Multi-step operations (e.g., `CreateOrder` + `CreateOrderItem` + `DeductStock`) **must** be executed entirely within a single transaction targeting the **Primary DB pool**.
