@@ -19,3 +19,25 @@ RETURNING id, email, full_name;
 -- name: DeleteUser :exec
 DELETE FROM users
 WHERE id = $1;
+
+
+-- name: CreateProduct :one
+INSERT INTO products (
+    name, 
+    price
+) VALUES (
+    $1, $2
+)
+RETURNING id, name, price;
+
+-- name: UpdateProduct :one
+UPDATE products
+SET 
+    name = $2,
+    price = $3
+WHERE id = $1
+RETURNING id, name, price;
+
+-- name: DeleteProduct :exec
+DELETE FROM products
+WHERE id = $1;
