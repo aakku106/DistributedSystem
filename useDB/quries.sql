@@ -15,3 +15,7 @@ SET
     full_name = COALESCE($3, full_name)
 WHERE id = $1
 RETURNING id, email, full_name;
+
+-- name: DeleteUser :exec
+DELETE FROM users
+WHERE id = $1;
