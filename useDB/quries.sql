@@ -82,9 +82,9 @@ RETURNING id, user_id, status, total_amount, created_at;
 
 -- name: CreateOrderItem :one
 INSERT INTO order_items (
-    order_id, 
-    product_id, 
-    unit_price, 
+    order_id,
+    product_id,
+    unit_price,
     quantity
 ) VALUES (
     $1, $2, $3, $4
@@ -100,6 +100,6 @@ RETURNING id, status;
 -- name: CancelOrder :one
 UPDATE orders
 SET status = 'CANCELLED'
-WHERE id = $1 
+WHERE id = $1
   AND status != 'CANCELLED'
 RETURNING id, status;
