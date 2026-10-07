@@ -103,3 +103,12 @@ SET status = 'CANCELLED'
 WHERE id = $1
   AND status != 'CANCELLED'
 RETURNING id, status;
+
+-- name: RestoreStockFromOrder :exec
+UPDATE stock s
+SET
+    quantity = s.quantity + oi.quantity,
+    updated_at = CURRENT_TIMESTAMP
+FROM order_items oi
+WHERE oi.product_id = s.product_id
+  AND oi.order_id = $1;
