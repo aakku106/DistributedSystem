@@ -79,3 +79,14 @@ INSERT INTO orders (
     $1, $2, $3
 )
 RETURNING id, user_id, status, total_amount, created_at;
+
+-- name: CreateOrderItem :one
+INSERT INTO order_items (
+    order_id, 
+    product_id, 
+    unit_price, 
+    quantity
+) VALUES (
+    $1, $2, $3, $4
+)
+RETURNING id, order_id, product_id, unit_price, quantity;
