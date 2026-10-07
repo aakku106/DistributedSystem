@@ -41,3 +41,30 @@ RETURNING id, name, price;
 -- name: DeleteProduct :exec
 DELETE FROM products
 WHERE id = $1;
+
+
+-- name: CreateStock :one
+INSERT INTO stock (
+    product_id, 
+    quantity
+) VALUES (
+    $1, $2
+)
+RETURNING product_id, quantity, updated_at;
+
+-- name: UpdateStock :one
+UPDATE stock
+SET 
+    quantity = $2,
+    updated_at = CURRENT_TIMESTAMP
+WHERE product_id = $1
+RETURNING product_id, quantity, updated_at;
+
+-- name: DeductStock :one
+UPDATE stock
+SET 
+    quantity = quantity - $2,
+    updated_at = CURRENT_TIMESTAMP
+WHERE product_id = $1 
+  AND quantity >= $2
+RETURNING product_id, quantity, updated_at;
