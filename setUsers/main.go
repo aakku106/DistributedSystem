@@ -68,6 +68,7 @@ func (s *Server) handleCreateUser(w http.ResponseWriter, r *http.Request) {
 		Email:    req.Email,
 	})
 	if err != nil {
+		log.Printf("CreateUser DB Error: %v\n", err)
 		http.Error(w, `{"error": "failed to create user"}`, http.StatusInternalServerError)
 		return
 	}
