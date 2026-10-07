@@ -19,6 +19,7 @@ type Querier interface {
 	// ============================================================================
 	CreateUser(ctx context.Context, arg CreateUserParams) (CreateUserRow, error)
 	DeductStock(ctx context.Context, arg DeductStockParams) (Stock, error)
+	DeleteUser(ctx context.Context, id pgtype.UUID) error
 	GetOrderDetails(ctx context.Context, id pgtype.UUID) (Order, error)
 	GetOrderItems(ctx context.Context, orderID pgtype.UUID) ([]GetOrderItemsRow, error)
 	GetProductByID(ctx context.Context, id pgtype.UUID) (Product, error)
