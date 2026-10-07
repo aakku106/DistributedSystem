@@ -14,6 +14,10 @@ SET email = COALESCE($2, email),
 WHERE id = $1
 RETURNING id, email, full_name;
 
+-- name: DeleteUser :exec
+DELETE FROM users
+WHERE id = $1;
+
 -- name: CreateProduct :one
 INSERT INTO products (name, price)
 VALUES ($1, $2)
