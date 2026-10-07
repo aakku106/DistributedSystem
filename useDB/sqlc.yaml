@@ -1,12 +1,12 @@
 version: "2"
 sql:
   - engine: "postgresql"
-    schema: "schema.sql"
-    queries: "./quries_*.sql"
+    schema: "schemas/schema.sql"
+    queries: "quries/*.sql"
     gen:
       go:
-        package: "useDB"
-        out: "."
+        package: "stores"
+        out: "stores"
         sql_package: "pgx/v5"
         emit_json_tags: true
         emit_interface: true
