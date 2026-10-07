@@ -68,3 +68,14 @@ SET
 WHERE product_id = $1 
   AND quantity >= $2
 RETURNING product_id, quantity, updated_at;
+
+
+-- name: CreateOrder :one
+INSERT INTO orders (
+    user_id,
+    status,
+    total_amount
+) VALUES (
+    $1, $2, $3
+)
+RETURNING id, user_id, status, total_amount, created_at;
