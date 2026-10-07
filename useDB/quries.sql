@@ -90,3 +90,16 @@ INSERT INTO order_items (
     $1, $2, $3, $4
 )
 RETURNING id, order_id, product_id, unit_price, quantity;
+
+-- name: UpdateOrderStatus :one
+UPDATE orders
+SET status = $2
+WHERE id = $1
+RETURNING id, status;
+
+-- name: CancelOrder :one
+UPDATE orders
+SET status = 'CANCELLED'
+WHERE id = $1 
+  AND status != 'CANCELLED'
+RETURNING id, status;
